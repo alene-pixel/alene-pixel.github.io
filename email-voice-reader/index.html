@@ -1183,6 +1183,34 @@
             }
         }
 
+        // Phrases that mean the plain-text version of an email is only a
+        // STAND-IN — a note telling the reader to go look at the HTML version.
+        // When one of these appears, the real message is in the HTML version
+        // however long each one is.
+        //
+        // Length alone cannot find these. A stand-in is often LONGER than the
+        // message it stands in for, because MailerLite pads it with two
+        // ~250-character click-tracking links: an Animal Welfare Economics
+        // seminar notice ran 679 characters of stand-in against 571 characters
+        // of real text, so the "HTML says far more" test in getEmailBody()
+        // failed both ways and the app read the stand-in aloud (reported by
+        // Alene 2026-11-13).
+        //
+        // ONLY phrases claiming the reader CANNOT display HTML belong here.
+        // A phrase that merely offers a web copy does not: 61 Substack emails
+        // in Alene's mail say "view this post on the web" underneath the full
+        // post, and 59 of them read correctly from the plain version as it is.
+        const PLAIN_TEXT_STANDIN_MARKERS = [
+            /e-?mail (?:software|client|reader|program|app)\s+(?:can'?t|cannot|does\s?n[o']?t)\s+(?:display|show|read|support)/i,
+            /(?:requires?|needs?) a modern e-?mail (?:reader|client)/i,
+            /(?:does\s?n[o']?t|cannot|can'?t) support html/i
+        ];
+
+        // A stand-in is short by nature — its whole job is to say "look
+        // elsewhere" — so the test is limited to short bodies. That keeps a
+        // long email that merely discusses email software from being swapped.
+        const PLAIN_TEXT_STANDIN_MAX_LENGTH = 2000;
+
         // ============================================================
         // EMAIL UTILITIES - Static helper functions
         // ============================================================
@@ -1290,7 +1318,13 @@
                                 const htmlText = this.cleanBodyForSpeech(this.decodeBase64UTF8(htmlPart.body.data));
                                 const htmlSaysFarMore = htmlText.length >= 2 * plainText.length &&
                                                         htmlText.length - plainText.length >= 500;
-                                return (htmlSaysFarMore ? htmlText : plainText) || 'This email has no text content.';
+                                // Second path, added 2026-11-13: the plain version says outright
+                                // that it cannot carry the message. Then the HTML version wins
+                                // even when it is SHORTER, so long as it actually says something.
+                                const plainIsStandIn = htmlText.length >= 40 &&
+                                                       this.isPlainTextStandIn(plainText);
+                                return ((htmlSaysFarMore || plainIsStandIn) ? htmlText : plainText) ||
+                                       'This email has no text content.';
                             }
                             const partToUse = plainPart || htmlPart;
                             if (partToUse) {
@@ -1306,6 +1340,13 @@
                 if (!body) return 'This email has no readable text content.';
 
                 return this.cleanBodyForSpeech(body) || 'This email has no text content.';
+            }
+
+            // True when a plain-text version is only a stand-in for the HTML one
+            // (see PLAIN_TEXT_STANDIN_MARKERS above for why length cannot tell).
+            static isPlainTextStandIn(plainText) {
+                if (!plainText || plainText.length > PLAIN_TEXT_STANDIN_MAX_LENGTH) return false;
+                return PLAIN_TEXT_STANDIN_MARKERS.some(marker => marker.test(plainText));
             }
 
             // Turns an email body (plain text or HTML) into the text that gets spoken.
